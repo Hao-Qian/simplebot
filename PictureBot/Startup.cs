@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Microsoft.Bot.Builder.AI.Luis;
 using Microsoft.Bot.Builder.Dialogs;
 using Microsoft.Bot.Builder.Integration;
 using Microsoft.Bot.Connector.Authentication;
@@ -138,6 +139,24 @@ namespace PictureBot
 
                 return accessors;
             });
+            services.AddSingleton(sp =>
+            {
+                var luisApplication = new LuisApplication(
+                    Configuration.GetSection("luisAppId")?.Value,
+                    Configuration.GetSection("luisAppKey")?.Value,
+                    Configuration.GetSection("luisEndPoint")?.Value);
+                // Set the recognizer options depending on which endpoint version you want to use.
+                // More details can be found in https://docs.microsoft.com/en-gb/azure/cognitive-services/luis/luis-migration-api-v3
+                var recognizerOptions = new LuisRecognizerOptionsV3(luisApplication)
+                {
+                    PredictionOptions = new Microsoft.Bot.Builder.AI.LuisV3.LuisPredictionOptions
+                    {
+                        IncludeAllIntents = true,
+                    }
+                };
+                return new LuisRecognizer(recognizerOptions);
+            });
+
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

@@ -3,6 +3,7 @@
 //
 // Generated with Bot Builder V4 SDK Template for Visual Studio EchoBot v4.11.1
 
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Bot.Builder;
@@ -10,6 +11,7 @@ using Microsoft.Bot.Builder.Dialogs;
 using Microsoft.Extensions.Logging;
 using PictureBot.Responses;
 using PictureBot.Middleware;
+using Microsoft.Bot.Builder.AI.Luis;
 
 namespace PictureBot.Bots
 {
@@ -20,6 +22,7 @@ namespace PictureBot.Bots
 
         private readonly ILogger _logger;
         private DialogSet _dialogs;
+        private LuisRecognizer _recognizer { get; } = null;
 
         /// <summary>
         /// Every conversation turn for our PictureBot will call this method.
@@ -34,7 +37,8 @@ namespace PictureBot.Bots
         /// <seealso cref="BotStateSet"/>
         /// <seealso cref="ConversationState"/>
         /// <seealso cref="IMiddleware"/>
-        public override async Task OnTurnAsync(ITurnContext turnContext, CancellationToken cancellationToken = default(CancellationToken))
+        public override async Task OnTurnAsync(ITurnContext turnContext,
+            CancellationToken cancellationToken = default(CancellationToken))
         {
             if (turnContext.Activity.Type is "message")
             {
@@ -56,13 +60,14 @@ namespace PictureBot.Bots
                 }
             }
         }
+
         /// <summary>
         /// Initializes a new instance of the <see cref="PictureBot"/> class.
         /// </summary>
         /// <param name="accessors">A class containing <see cref="IStatePropertyAccessor{T}"/> used to manage state.</param>
         /// <param name="loggerFactory">A <see cref="ILoggerFactory"/> that is hooked to the Azure App Service provider.</param>
         /// <seealso cref="https://docs.microsoft.com/en-us/aspnet/core/fundamentals/logging/?view=aspnetcore-2.1#windows-eventlog-provider"/>
-        public PictureBot(PictureBotAccessors accessors, ILoggerFactory loggerFactory /*, LuisRecognizer recognizer*/)
+        public PictureBot(PictureBotAccessors accessors, ILoggerFactory loggerFactory, LuisRecognizer recognizer)
         {
             if (loggerFactory == null)
             {
@@ -70,6 +75,7 @@ namespace PictureBot.Bots
             }
 
             // Add instance of LUIS Recognizer
+            _recognizer = recognizer ?? throw new ArgumentNullException(nameof(recognizer));
 
             _logger = loggerFactory.CreateLogger<PictureBot>();
             _logger.LogTrace("PictureBot turn start.");
@@ -85,8 +91,8 @@ namespace PictureBot.Bots
             // dialogs into different files.
             var main_waterfallsteps = new WaterfallStep[]
             {
-            GreetingAsync,
-            MainMenuAsync,
+                GreetingAsync,
+                MainMenuAsync,
             };
             var search_waterfallsteps = new WaterfallStep[]
             {
@@ -103,7 +109,8 @@ namespace PictureBot.Bots
 
         // If we haven't greeted a user yet, we want to do that first, but for the rest of the
         // conversation we want to remember that we've already greeted them.
-        private async Task<DialogTurnResult> GreetingAsync(WaterfallStepContext stepContext, CancellationToken cancellationToken)
+        private async Task<DialogTurnResult> GreetingAsync(WaterfallStepContext stepContext,
+            CancellationToken cancellationToken)
         {
             // Get the state for the current step in the conversation
             var state = await _accessors.PictureState.GetAsync(stepContext.Context, () => new PictureState());
@@ -136,43 +143,92 @@ namespace PictureBot.Bots
         // This step routes the user to different dialogs
         // In this case, there's only one other dialog, so it is more simple,
         // but in more complex scenarios you can go off to other dialogs in a similar
-        public async Task<DialogTurnResult> MainMenuAsync(WaterfallStepContext stepContext, CancellationToken cancellationToken)
+        public async Task<DialogTurnResult> MainMenuAsync(WaterfallStepContext stepContext,
+            CancellationToken cancellationToken)
         {
-            // Check if we are currently processing a user's search
-            var state = await _accessors.PictureState.GetAsync(stepContext.Context);
 
-            // If Regex picks up on anything, store it
-            var recognizedIntents = stepContext.Context.TurnState.Get<IRecognizedIntents>();
-            // Based on the recognized intent, direct the conversation
-            switch (recognizedIntents.TopIntent?.Name)
+            // Call LUIS recognizer
+            var result = await _recognizer.RecognizeAsync(stepContext.Context, cancellationToken);
+            // Get the top intent from the results
+            var topIntent = result?.GetTopScoringIntent();
+            // Based on the intent, switch the conversation, similar concept as with Regex above
+            switch ((topIntent != null) ? topIntent.Value.intent : null)
             {
-                case "search":
-                    // switch to the search dialog
-                    return await stepContext.BeginDialogAsync("searchDialog", null, cancellationToken);
-                case "share":
-                    // respond that you're sharing the photo
-                    await MainResponses.ReplyWithShareConfirmation(stepContext.Context);
-                    return await stepContext.EndDialogAsync();
-                case "order":
-                    // respond that you're ordering
-                    await MainResponses.ReplyWithOrderConfirmation(stepContext.Context);
-                    return await stepContext.EndDialogAsync();
-                case "help":
-                    // show help
+                case null:
+                    // Add app logic when there is no result.
+                    await MainResponses.ReplyWithConfused(stepContext.Context);
+                    break;
+                case "None":
+                    await MainResponses.ReplyWithConfused(stepContext.Context);
+                    // with each statement, we're adding the LuisScore, purely to test, so we know whether LUIS was called or not
+                    await MainResponses.ReplyWithLuisScore(stepContext.Context, topIntent.Value.intent,
+                        topIntent.Value.score);
+                    break;
+                case "Greeting":
+                    await MainResponses.ReplyWithGreeting(stepContext.Context);
                     await MainResponses.ReplyWithHelp(stepContext.Context);
-                    return await stepContext.EndDialogAsync();
+                    await MainResponses.ReplyWithLuisScore(stepContext.Context, topIntent.Value.intent,
+                        topIntent.Value.score);
+                    break;
+                case "OrderPic":
+                    await MainResponses.ReplyWithOrderConfirmation(stepContext.Context);
+                    await MainResponses.ReplyWithLuisScore(stepContext.Context, topIntent.Value.intent,
+                        topIntent.Value.score);
+                    break;
+                case "SharePic":
+                    await MainResponses.ReplyWithShareConfirmation(stepContext.Context);
+                    await MainResponses.ReplyWithLuisScore(stepContext.Context, topIntent.Value.intent,
+                        topIntent.Value.score);
+                    break;
+                case "SearchPic":
+                    await MainResponses.ReplyWithSearchConfirmation(stepContext.Context);
+                    await MainResponses.ReplyWithLuisScore(stepContext.Context, topIntent.Value.intent,
+                        topIntent.Value.score);
+                    break;
                 default:
-                    {
-                        await MainResponses.ReplyWithConfused(stepContext.Context);
-                        return await stepContext.EndDialogAsync();
-                    }
+                    await MainResponses.ReplyWithConfused(stepContext.Context);
+                    break;
             }
+
+            return await stepContext.EndDialogAsync();
         }
 
-        // Add MainDialog-related tasks
 
-        // Add SearchDialog-related tasks
+        //// Check if we are currently processing a user's search
+        //var state = await _accessors.PictureState.GetAsync(stepContext.Context);
 
-        // Add search related tasks
+        //// If Regex picks up on anything, store it
+        //var recognizedIntents = stepContext.Context.TurnState.Get<IRecognizedIntents>();
+        //// Based on the recognized intent, direct the conversation
+        //switch (recognizedIntents.TopIntent?.Name)
+        //{
+        //    case "search":
+        //        // switch to the search dialog
+        //        return await stepContext.BeginDialogAsync("searchDialog", null, cancellationToken);
+        //    case "share":
+        //        // respond that you're sharing the photo
+        //        await MainResponses.ReplyWithShareConfirmation(stepContext.Context);
+        //        return await stepContext.EndDialogAsync();
+        //    case "order":
+        //        // respond that you're ordering
+        //        await MainResponses.ReplyWithOrderConfirmation(stepContext.Context);
+        //        return await stepContext.EndDialogAsync();
+        //    case "help":
+        //        // show help
+        //        await MainResponses.ReplyWithHelp(stepContext.Context);
+        //        return await stepContext.EndDialogAsync();
+        //    default:
+        //        {
+        //            await MainResponses.ReplyWithConfused(stepContext.Context);
+        //            return await stepContext.EndDialogAsync();
+        //            // Call LUIS recognizer
+        //        }
+        //}
     }
-}
+
+    // Add MainDialog-related tasks
+
+    // Add SearchDialog-related tasks
+
+    // Add search related tasks
+};

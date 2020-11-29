@@ -30,6 +30,11 @@ namespace PictureBot.Responses
         {
             await context.SendActivityAsync($"Posting your picture(s) on twitter...");
         }
+        public static async Task ReplyWithSearchConfirmation(ITurnContext context)
+        {
+            await context.SendActivityAsync($"Reply With Search Confirmation...");
+        }
+        
         public static async Task ReplyWithOrderConfirmation(ITurnContext context)
         {
             await context.SendActivityAsync($"Ordering standard prints of your picture(s)...");
